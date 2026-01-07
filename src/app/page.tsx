@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { seedDatabase, addCostsData } from "@/lib/seedData";
+import { seedDatabase } from "@/lib/seedData";
 
 type TimelineItem = {
   time: string;
   title: string;
   desc: string;
   url?: string;
+  mapUrl?: string;
   isDrive?: boolean;
   highlight?: boolean;
   tag?: string;
@@ -35,6 +36,11 @@ type Costs = {
   perPerson: { people: number; min: number; max: number };
   individual: CostItem[];
   note: string;
+};
+
+type Saunas = {
+  infoUrl: string;
+  recommended: string[];
 };
 
 type TripData = {
@@ -66,6 +72,7 @@ type TripData = {
     checkin: string;
     checkout: string;
     url: string;
+    mapUrl?: string;
   };
   days: DaySchedule[];
   spots: {
@@ -75,14 +82,10 @@ type TripData = {
       phone: string;
       hours: string;
       closed: string;
+      mapUrl?: string;
     };
   };
-  saunas: {
-    name: string;
-    feature: string;
-    price: string;
-    hours: string;
-  }[];
+  saunas: Saunas;
   checklist: {
     text: string;
     done: boolean;
@@ -92,6 +95,21 @@ type TripData = {
   costs?: Costs;
   updatedAt: string;
 };
+
+// 地図ボタンコンポーネント
+function MapButton({ url }: { url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs bg-[#4ecdc4]/30 hover:bg-[#4ecdc4]/50 text-[#4ecdc4] px-2 py-1 rounded-full transition mt-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      📍 地図
+    </a>
+  );
+}
 
 export default function Home() {
   const [tripData, setTripData] = useState<TripData | null>(null);
@@ -361,6 +379,9 @@ export default function Home() {
               <p className="mt-2 text-sm opacity-90">
                 {tripData.accommodation.address}
               </p>
+              {tripData.accommodation.mapUrl && (
+                <MapButton url={tripData.accommodation.mapUrl} />
+              )}
               <p className="mt-2 text-sm opacity-70">
                 {tripData.accommodation.details}
               </p>
@@ -457,6 +478,7 @@ export default function Home() {
                       <div className="text-sm opacity-70 whitespace-pre-line">
                         {item.desc}
                       </div>
+                      {item.mapUrl && <MapButton url={item.mapUrl} />}
                     </div>
                   ))}
                 </div>
@@ -464,6 +486,54 @@ export default function Home() {
             </div>
           ))}
         </div>
+
+        {/* Saunas */}
+        {tripData.saunas && (
+          <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+            <div
+              className="flex justify-between items-center cursor-pointer"
+              onClick={() => toggleSection("saunas")}
+            >
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <span>🧖</span> 定山渓サウナ施設
+              </h2>
+              <span
+                className={`opacity-40 transition-transform ${
+                  openSections.includes("saunas") ? "rotate-180" : ""
+                }`}
+              >
+                ▼
+              </span>
+            </div>
+
+            {openSections.includes("saunas") && (
+              <div className="mt-4">
+                <a
+                  href={tripData.saunas.infoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block bg-[#ff6b9d]/20 text-[#ff6b9d] px-4 py-2 rounded-lg hover:bg-[#ff6b9d]/30 transition mb-4"
+                >
+                  📖 日帰り入浴施設一覧を見る 🔗
+                </a>
+                
+                <div className="mt-4">
+                  <p className="text-sm text-[#4ecdc4] font-bold mb-2">おすすめ施設</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tripData.saunas.recommended.map((name, idx) => (
+                      <span
+                        key={idx}
+                        className="bg-white/10 px-3 py-1 rounded-full text-sm"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Checklist */}
         <div className="bg-[#1e1e32]/90 backdrop-blur rounded-2xl p-6 mb-5 border border-white/30">
@@ -626,8 +696,8 @@ export default function Home() {
           最終更新: {new Date(tripData.updatedAt).toLocaleString("ja-JP")}
         </div>
 
- 
 
+      
       </main>
     </div>
   );
