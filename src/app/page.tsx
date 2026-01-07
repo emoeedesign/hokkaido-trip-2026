@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { seedDatabase } from "@/lib/seedData";
+import { seedDatabase, addCostsData } from "@/lib/seedData";
 
 type TimelineItem = {
   time: string;
@@ -21,6 +21,20 @@ type DaySchedule = {
   title: string;
   titleUrl?: string;
   timeline: TimelineItem[];
+};
+
+type CostItem = {
+  label: string;
+  amount: number | string;
+  note?: string;
+};
+
+type Costs = {
+  shared: CostItem[];
+  sharedTotal: { min: number; max: number };
+  perPerson: { people: number; min: number; max: number };
+  individual: CostItem[];
+  note: string;
 };
 
 type TripData = {
@@ -75,6 +89,7 @@ type TripData = {
     result?: string;
     options?: string;
   }[];
+  costs?: Costs;
   updatedAt: string;
 };
 
@@ -148,6 +163,13 @@ export default function Home() {
       checklist: newChecklist,
       updatedAt: new Date().toISOString(),
     });
+  };
+
+  const formatAmount = (amount: number | string) => {
+    if (typeof amount === "number") {
+      return `¥${amount.toLocaleString()}`;
+    }
+    return `¥${amount}`;
   };
 
   if (loading) {
@@ -486,10 +508,126 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Costs */}
+        {tripData.costs && (
+          <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+            <div
+              className="flex justify-between items-center cursor-pointer"
+              onClick={() => toggleSection("costs")}
+            >
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <span>💰</span> 費用
+              </h2>
+              <span
+                className={`opacity-40 transition-transform ${
+                  openSections.includes("costs") ? "rotate-180" : ""
+                }`}
+              >
+                ▼
+              </span>
+            </div>
+
+            {openSections.includes("costs") && (
+              <div className="mt-4 space-y-6">
+                {/* Shared Costs */}
+                <div>
+                  <h3 className="text-sm text-[#4ecdc4] font-bold mb-3">
+                    🚗 みんなで割り勘
+                  </h3>
+                  <div className="space-y-2">
+                    {tripData.costs.shared.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center py-2 border-b border-white/10"
+                      >
+                        <span className="opacity-90">
+                          {item.label}
+                          {item.note && (
+                            <span className="text-xs opacity-50 ml-2">
+                              ({item.note})
+                            </span>
+                          )}
+                        </span>
+                        <span className="font-bold">
+                          {formatAmount(item.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 bg-[#4ecdc4]/20 rounded-xl p-4">
+                    <div className="flex justify-between items-center">
+                      <span className="opacity-70">合計</span>
+                      <span className="font-bold">
+                        ¥{tripData.costs.sharedTotal.min.toLocaleString()} 〜 ¥
+                        {tripData.costs.sharedTotal.max.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center mt-2 text-lg">
+                      <span className="text-[#4ecdc4]">
+                        {tripData.costs.perPerson.people}人で割ると
+                      </span>
+                      <span className="font-bold text-[#4ecdc4]">
+                        ¥{tripData.costs.perPerson.min.toLocaleString()} 〜 ¥
+                        {tripData.costs.perPerson.max.toLocaleString()}
+                        <span className="text-sm opacity-70">/人</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Individual Costs */}
+                <div>
+                  <h3 className="text-sm text-[#ff6b9d] font-bold mb-3">
+                    🎿 個人で払うもの
+                  </h3>
+                  <div className="space-y-2">
+                    {tripData.costs.individual.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center py-2 border-b border-white/10"
+                      >
+                        <span className="opacity-90">{item.label}</span>
+                        <span className="font-bold">
+                          {formatAmount(item.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 bg-[#ff6b9d]/20 rounded-xl p-4">
+                    <div className="flex justify-between items-center text-lg">
+                      <span className="text-[#ff6b9d]">個人負担 合計</span>
+                      <span className="font-bold text-[#ff6b9d]">
+                        ¥
+                        {tripData.costs.individual
+                          .reduce((sum, item) => {
+                            if (typeof item.amount === "number") {
+                              return sum + item.amount;
+                            }
+                            return sum;
+                          }, 0)
+                          .toLocaleString()}
+                        <span className="text-sm opacity-70">/人</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Note */}
+                <p className="text-xs text-center opacity-50">
+                  {tripData.costs.note}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Last Updated */}
         <div className="text-center text-sm opacity-50">
           最終更新: {new Date(tripData.updatedAt).toLocaleString("ja-JP")}
         </div>
+
+ 
+
       </main>
     </div>
   );
