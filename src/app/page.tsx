@@ -128,7 +128,6 @@ type TripData = {
   updatedAt: string;
 };
 
-// 地図ボタンコンポーネント
 function MapButton({ url }: { url: string }) {
   return (
     <a
@@ -143,7 +142,6 @@ function MapButton({ url }: { url: string }) {
   );
 }
 
-// 天気カードコンポーネント
 function WeatherCard({ forecast, showSnowboard = false }: { forecast: DailyForecast | null; showSnowboard?: boolean }) {
   if (!forecast) {
     return (
@@ -188,7 +186,6 @@ function WeatherCard({ forecast, showSnowboard = false }: { forecast: DailyForec
   );
 }
 
-// 精算結果を計算する関数
 function calculateSettlements(members: string[], expenses: Expense[]): { from: string; to: string; amount: number }[] {
   const balances: Record<string, number> = {};
   members.forEach(m => balances[m] = 0);
@@ -242,9 +239,7 @@ function calculateSettlements(members: string[], expenses: Expense[]): { from: s
   return settlements;
 }
 
-// SpotifyのURLからIDを抽出
 function extractSpotifyId(url: string): string | null {
-  // https://open.spotify.com/playlist/xxxxx?si=yyyy
   const match = url.match(/playlist\/([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
 }
@@ -257,11 +252,9 @@ export default function Home() {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   
-  // 天気予報のstate
   const [weatherData, setWeatherData] = useState<Record<string, DailyForecast[]>>({});
   const [weatherLoading, setWeatherLoading] = useState(true);
 
-  // 割り勘計算機のstate
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [newExpense, setNewExpense] = useState({
     paidBy: "",
@@ -270,22 +263,18 @@ export default function Home() {
     splitAmong: [] as string[],
   });
 
-  // コメント機能のstate
   const [commentTarget, setCommentTarget] = useState<{ day: number; index: number } | null>(null);
   const [newComment, setNewComment] = useState({ author: "", text: "" });
 
-  // Spotifyのstate
   const [showSpotifyForm, setShowSpotifyForm] = useState(false);
   const [spotifyUrl, setSpotifyUrl] = useState("");
 
-  // 旅行日程
   const tripDates = {
     day1: "2026-01-11",
     day2: "2026-01-12", 
     day3: "2026-01-13",
   };
 
-  // デフォルトメンバー
   const defaultMembers = ["和也", "こばお", "かいと", "さやか", "もえぎちゃん"];
 
   useEffect(() => {
@@ -306,7 +295,6 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  // 天気予報を取得
   useEffect(() => {
     async function loadWeather() {
       setWeatherLoading(true);
@@ -380,7 +368,6 @@ export default function Home() {
     return `¥${amount}`;
   };
 
-  // 割り勘関連の関数
   const getMembers = () => {
     return tripData?.expenseSplitter?.members || defaultMembers;
   };
@@ -443,7 +430,6 @@ export default function Home() {
     }));
   };
 
-  // コメント関連の関数
   const getComments = () => {
     return tripData?.comments || [];
   };
@@ -489,7 +475,6 @@ export default function Home() {
     });
   };
 
-  // Spotify関連の関数
   const handleSaveSpotify = async () => {
     if (!tripData || !spotifyUrl) return;
 
@@ -508,7 +493,6 @@ export default function Home() {
     setShowSpotifyForm(false);
   };
 
-  // 各日の天気を取得するヘルパー関数
   const getWeatherForDay = (dayNum: number): { forecast: DailyForecast | null; location: string } => {
     const dateKey = dayNum === 1 ? tripDates.day1 : dayNum === 2 ? tripDates.day2 : tripDates.day3;
     
@@ -585,7 +569,140 @@ export default function Home() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pb-12">
-        {/* Spotify Playlist */}
+        {/* 1. 🌤️ Weather Forecast */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("weather")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>🌤️</span> 天気予報
+            </h2>
+            <span className={`opacity-40 transition-transform ${openSections.includes("weather") ? "rotate-180" : ""}`}>
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("weather") && (
+            <div className="mt-4 space-y-4">
+              {weatherLoading ? (
+                <div className="text-center py-8 opacity-50">天気情報を取得中...</div>
+              ) : (
+                <>
+                  <div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月11日（日）─ 支笏湖・定山渓</div>
+                    <WeatherCard forecast={getWeatherForDay(1).forecast} />
+                  </div>
+                  <div>
+                    <div className="text-sm text-[#ff6b9d] font-bold mb-2">1月12日（月）─ ルスツリゾート 🏂</div>
+                    <WeatherCard forecast={getWeatherForDay(2).forecast} showSnowboard={true} />
+                  </div>
+                  <div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月13日（火）─ 札幌・新千歳</div>
+                    <WeatherCard forecast={getWeatherForDay(3).forecast} />
+                  </div>
+                  <p className="text-xs text-center opacity-40 mt-4">※ Open-Meteo APIより取得（7日間予報）</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 2. ✈️ Flight Info */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("flight")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>✈️</span> フライト情報
+            </h2>
+            <span className={`opacity-40 transition-transform ${openSections.includes("flight") ? "rotate-180" : ""}`}>
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("flight") && (
+            <div className="mt-4 space-y-4">
+              <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
+                <div className="text-sm text-[#4ecdc4] mb-2">往路 ─ {tripData.flight.outbound.date}</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">{tripData.flight.outbound.from.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.outbound.from.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.from.time}</div>
+                  </div>
+                  <div className="text-2xl">✈︎→</div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">{tripData.flight.outbound.to.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.outbound.to.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.to.time}</div>
+                  </div>
+                </div>
+                <div className="text-center text-sm opacity-70 mt-2">
+                  {tripData.flight.outbound.airline} 直行便 {tripData.flight.outbound.duration}
+                </div>
+              </div>
+
+              <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
+                <div className="text-sm text-[#4ecdc4] mb-2">復路 ─ {tripData.flight.inbound.date}</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">{tripData.flight.inbound.from.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.inbound.from.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.from.time}</div>
+                  </div>
+                  <div className="text-2xl">✈︎→</div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">{tripData.flight.inbound.to.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.inbound.to.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.to.time}</div>
+                  </div>
+                </div>
+                <div className="text-center text-sm opacity-70 mt-2">
+                  {tripData.flight.inbound.airline} 直行便 {tripData.flight.inbound.duration}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 3. 🏠 Accommodation */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("accommodation")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>🏠</span> 宿泊先
+            </h2>
+            <span className={`opacity-40 transition-transform ${openSections.includes("accommodation") ? "rotate-180" : ""}`}>
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("accommodation") && (
+            <div className="mt-4">
+              <a
+                href={tripData.accommodation.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#4ecdc4] font-bold hover:underline"
+              >
+                {tripData.accommodation.name} 🔗
+              </a>
+              <p className="mt-2 text-sm opacity-90">{tripData.accommodation.address}</p>
+              {tripData.accommodation.mapUrl && <MapButton url={tripData.accommodation.mapUrl} />}
+              <p className="mt-2 text-sm opacity-70">{tripData.accommodation.details}</p>
+              <p className="text-sm opacity-70">★{tripData.accommodation.rating} ／ {tripData.accommodation.access}</p>
+              <p className="text-sm opacity-70">
+                チェックイン{tripData.accommodation.checkin} ／ チェックアウト{tripData.accommodation.checkout}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* 4. 🎵 Spotify Playlist */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
           <div
             className="flex justify-between items-center cursor-pointer"
@@ -655,46 +772,236 @@ export default function Home() {
           )}
         </div>
 
-        {/* Weather Forecast */}
+        {/* 5. 📅 Schedule */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
-          <div
-            className="flex justify-between items-center cursor-pointer"
-            onClick={() => toggleSection("weather")}
-          >
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <span>🌤️</span> 天気予報
-            </h2>
-            <span className={`opacity-40 transition-transform ${openSections.includes("weather") ? "rotate-180" : ""}`}>
-              ▼
-            </span>
-          </div>
+          <h2 className="text-xl font-bold flex items-center gap-2 mb-4">
+            <span>📅</span> スケジュール
+          </h2>
 
-          {openSections.includes("weather") && (
-            <div className="mt-4 space-y-4">
-              {weatherLoading ? (
-                <div className="text-center py-8 opacity-50">天気情報を取得中...</div>
-              ) : (
-                <>
-                  <div>
-                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月11日（日）─ 支笏湖・定山渓</div>
-                    <WeatherCard forecast={getWeatherForDay(1).forecast} />
-                  </div>
-                  <div>
-                    <div className="text-sm text-[#ff6b9d] font-bold mb-2">1月12日（月）─ ルスツリゾート 🏂</div>
-                    <WeatherCard forecast={getWeatherForDay(2).forecast} showSnowboard={true} />
-                  </div>
-                  <div>
-                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月13日（火）─ 札幌・新千歳</div>
-                    <WeatherCard forecast={getWeatherForDay(3).forecast} />
-                  </div>
-                  <p className="text-xs text-center opacity-40 mt-4">※ Open-Meteo APIより取得（7日間予報）</p>
-                </>
+          {tripData.days.map((day) => (
+            <div key={day.day} className="mb-4">
+              <div
+                className="flex items-center gap-4 cursor-pointer p-3 rounded-xl bg-white/5 hover:bg-white/10 transition"
+                onClick={() => toggleDay(day.day)}
+              >
+                <div className="bg-gradient-to-br from-[#ff6b9d] to-[#4ecdc4] rounded-xl w-14 h-14 flex flex-col items-center justify-center">
+                  <span className="text-xl font-bold">{day.day}</span>
+                  <span className="text-xs">DAY</span>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-bold">{day.date}</h3>
+                  <p className="text-sm opacity-70">
+                    {day.titleUrl ? (
+                      <a
+                        href={day.titleUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#4ecdc4] hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {day.title} 🔗
+                      </a>
+                    ) : (
+                      day.title
+                    )}
+                  </p>
+                </div>
+                {!weatherLoading && getWeatherForDay(day.day).forecast && (
+                  <div className="text-2xl">{getWeatherForDay(day.day).forecast?.weatherIcon}</div>
+                )}
+                <span className={`opacity-40 transition-transform ${openDays.includes(day.day) ? "rotate-180" : ""}`}>
+                  ▼
+                </span>
+              </div>
+
+              {openDays.includes(day.day) && (
+                <div className="mt-4 ml-4 border-l-2 border-white/20 pl-4 space-y-4">
+                  {day.timeline.map((item, idx) => {
+                    const itemComments = getCommentsForItem(day.day, idx);
+                    const isCommentTarget = commentTarget?.day === day.day && commentTarget?.index === idx;
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className={`relative ${
+                          item.highlight
+                            ? "bg-[#ff6b9d]/20 -ml-4 pl-4 py-2 rounded-r-xl border-l-2 border-[#ff6b9d]"
+                            : ""
+                        }`}
+                      >
+                        {item.time && (
+                          <div className="text-xs text-[#4ecdc4] font-bold mb-1">{item.time}</div>
+                        )}
+                        <div className="font-bold">
+                          {item.url ? (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#4ecdc4] hover:underline"
+                            >
+                              {item.title} 🔗
+                            </a>
+                          ) : (
+                            item.title
+                          )}
+                          {item.tag && (
+                            <span className="ml-2 text-xs bg-[#ff6b9d] px-2 py-1 rounded">{item.tag}</span>
+                          )}
+                        </div>
+                        <div className="text-sm opacity-70 whitespace-pre-line">{item.desc}</div>
+                        
+                        <div className="flex items-center gap-2 mt-2">
+                          {item.mapUrl && <MapButton url={item.mapUrl} />}
+                          <button
+                            onClick={() => setCommentTarget(isCommentTarget ? null : { day: day.day, index: idx })}
+                            className="inline-flex items-center gap-1 text-xs bg-[#6b89ff]/30 hover:bg-[#6b89ff]/50 text-[#6b89ff] px-2 py-1 rounded-full transition"
+                          >
+                            💬 {itemComments.length > 0 ? itemComments.length : ""}
+                          </button>
+                        </div>
+
+                        {itemComments.length > 0 && (
+                          <div className="mt-2 space-y-2">
+                            {itemComments.map(comment => (
+                              <div key={comment.id} className="bg-white/5 rounded-lg p-2 text-sm">
+                                <div className="flex justify-between items-start">
+                                  <span className="font-bold text-[#6b89ff]">{comment.author}</span>
+                                  <button
+                                    onClick={() => handleDeleteComment(comment.id)}
+                                    className="text-xs opacity-50 hover:opacity-100"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                                <p className="opacity-90">{comment.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {isCommentTarget && (
+                          <div className="mt-2 bg-white/5 rounded-lg p-3 space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {members.map(member => (
+                                <button
+                                  key={member}
+                                  onClick={() => setNewComment(prev => ({ ...prev, author: member }))}
+                                  className={`px-2 py-1 rounded-full text-xs transition ${
+                                    newComment.author === member
+                                      ? "bg-[#6b89ff] text-white"
+                                      : "bg-white/10 hover:bg-white/20"
+                                  }`}
+                                >
+                                  {member}
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="text"
+                              value={newComment.text}
+                              onChange={(e) => setNewComment(prev => ({ ...prev, text: e.target.value }))}
+                              placeholder="コメントを入力..."
+                              className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#6b89ff]"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={handleAddComment}
+                                className="flex-1 py-1 bg-[#6b89ff] text-white rounded-lg text-sm font-bold hover:bg-[#5a78ee] transition"
+                              >
+                                投稿
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCommentTarget(null);
+                                  setNewComment({ author: "", text: "" });
+                                }}
+                                className="px-3 py-1 bg-white/10 rounded-lg text-sm hover:bg-white/20 transition"
+                              >
+                                閉じる
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
-          )}
+          ))}
         </div>
 
-        {/* Expense Splitter */}
+        {/* 6. 🧖 Saunas */}
+        {tripData.saunas && (
+          <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+            <div
+              className="flex justify-between items-center cursor-pointer"
+              onClick={() => toggleSection("saunas")}
+            >
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <span>🧖</span> 定山渓サウナ施設
+              </h2>
+              <span className={`opacity-40 transition-transform ${openSections.includes("saunas") ? "rotate-180" : ""}`}>
+                ▼
+              </span>
+            </div>
+
+            {openSections.includes("saunas") && (
+              <div className="mt-4">
+                <a
+                  href={tripData.saunas.infoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block bg-[#ff6b9d]/20 text-[#ff6b9d] px-4 py-2 rounded-lg hover:bg-[#ff6b9d]/30 transition mb-4"
+                >
+                  📖 日帰り入浴施設一覧を見る 🔗
+                </a>
+                <div className="mt-4">
+                  <p className="text-sm text-[#4ecdc4] font-bold mb-2">おすすめ施設</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tripData.saunas.recommended.map((name, idx) => (
+                      <span key={idx} className="bg-white/10 px-3 py-1 rounded-full text-sm">{name}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 7. 📝 Checklist */}
+        <div className="bg-[#1e1e32]/90 backdrop-blur rounded-2xl p-6 mb-5 border border-white/30">
+          <h2 className="text-xl font-bold flex items-center gap-2 mb-4">
+            <span>📝</span> 決めること
+          </h2>
+
+          <div className="space-y-3">
+            {tripData.checklist.map((item, idx) => (
+              <div
+                key={idx}
+                className="flex items-start gap-3 py-3 border-b border-white/10 last:border-0"
+              >
+                <button
+                  onClick={() => toggleChecklist(idx)}
+                  className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition ${
+                    item.done ? "bg-[#4ecdc4] border-[#4ecdc4] text-[#1a1a2e]" : "border-white/50"
+                  }`}
+                >
+                  {item.done && "✓"}
+                </button>
+                <div>
+                  <div className={item.done ? "line-through opacity-60" : "font-bold"}>{item.text}</div>
+                  <div className={`text-sm ${item.done ? "text-[#4ecdc4]" : "opacity-70"}`}>
+                    {item.done ? `→ ${item.result}` : item.options}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 8. 💸 Expense Splitter */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
           <div
             className="flex justify-between items-center cursor-pointer"
@@ -852,332 +1159,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Flight Info */}
-        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
-          <div
-            className="flex justify-between items-center cursor-pointer"
-            onClick={() => toggleSection("flight")}
-          >
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <span>✈️</span> フライト情報
-            </h2>
-            <span className={`opacity-40 transition-transform ${openSections.includes("flight") ? "rotate-180" : ""}`}>
-              ▼
-            </span>
-          </div>
-
-          {openSections.includes("flight") && (
-            <div className="mt-4 space-y-4">
-              <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
-                <div className="text-sm text-[#4ecdc4] mb-2">往路 ─ {tripData.flight.outbound.date}</div>
-                <div className="flex items-center justify-between">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">{tripData.flight.outbound.from.code}</div>
-                    <div className="text-sm opacity-70">{tripData.flight.outbound.from.name}</div>
-                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.from.time}</div>
-                  </div>
-                  <div className="text-2xl">✈︎→</div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">{tripData.flight.outbound.to.code}</div>
-                    <div className="text-sm opacity-70">{tripData.flight.outbound.to.name}</div>
-                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.to.time}</div>
-                  </div>
-                </div>
-                <div className="text-center text-sm opacity-70 mt-2">
-                  {tripData.flight.outbound.airline} 直行便 {tripData.flight.outbound.duration}
-                </div>
-              </div>
-
-              <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
-                <div className="text-sm text-[#4ecdc4] mb-2">復路 ─ {tripData.flight.inbound.date}</div>
-                <div className="flex items-center justify-between">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">{tripData.flight.inbound.from.code}</div>
-                    <div className="text-sm opacity-70">{tripData.flight.inbound.from.name}</div>
-                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.from.time}</div>
-                  </div>
-                  <div className="text-2xl">✈︎→</div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold">{tripData.flight.inbound.to.code}</div>
-                    <div className="text-sm opacity-70">{tripData.flight.inbound.to.name}</div>
-                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.to.time}</div>
-                  </div>
-                </div>
-                <div className="text-center text-sm opacity-70 mt-2">
-                  {tripData.flight.inbound.airline} 直行便 {tripData.flight.inbound.duration}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Accommodation */}
-        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
-          <div
-            className="flex justify-between items-center cursor-pointer"
-            onClick={() => toggleSection("accommodation")}
-          >
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <span>🏠</span> 宿泊先
-            </h2>
-            <span className={`opacity-40 transition-transform ${openSections.includes("accommodation") ? "rotate-180" : ""}`}>
-              ▼
-            </span>
-          </div>
-
-          {openSections.includes("accommodation") && (
-            <div className="mt-4">
-              <a
-                href={tripData.accommodation.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[#4ecdc4] font-bold hover:underline"
-              >
-                {tripData.accommodation.name} 🔗
-              </a>
-              <p className="mt-2 text-sm opacity-90">{tripData.accommodation.address}</p>
-              {tripData.accommodation.mapUrl && <MapButton url={tripData.accommodation.mapUrl} />}
-              <p className="mt-2 text-sm opacity-70">{tripData.accommodation.details}</p>
-              <p className="text-sm opacity-70">★{tripData.accommodation.rating} ／ {tripData.accommodation.access}</p>
-              <p className="text-sm opacity-70">
-                チェックイン{tripData.accommodation.checkin} ／ チェックアウト{tripData.accommodation.checkout}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Schedule */}
-        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
-          <h2 className="text-xl font-bold flex items-center gap-2 mb-4">
-            <span>📅</span> スケジュール
-          </h2>
-
-          {tripData.days.map((day) => (
-            <div key={day.day} className="mb-4">
-              <div
-                className="flex items-center gap-4 cursor-pointer p-3 rounded-xl bg-white/5 hover:bg-white/10 transition"
-                onClick={() => toggleDay(day.day)}
-              >
-                <div className="bg-gradient-to-br from-[#ff6b9d] to-[#4ecdc4] rounded-xl w-14 h-14 flex flex-col items-center justify-center">
-                  <span className="text-xl font-bold">{day.day}</span>
-                  <span className="text-xs">DAY</span>
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-bold">{day.date}</h3>
-                  <p className="text-sm opacity-70">
-                    {day.titleUrl ? (
-                      <a
-                        href={day.titleUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#4ecdc4] hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {day.title} 🔗
-                      </a>
-                    ) : (
-                      day.title
-                    )}
-                  </p>
-                </div>
-                {!weatherLoading && getWeatherForDay(day.day).forecast && (
-                  <div className="text-2xl">{getWeatherForDay(day.day).forecast?.weatherIcon}</div>
-                )}
-                <span className={`opacity-40 transition-transform ${openDays.includes(day.day) ? "rotate-180" : ""}`}>
-                  ▼
-                </span>
-              </div>
-
-              {openDays.includes(day.day) && (
-                <div className="mt-4 ml-4 border-l-2 border-white/20 pl-4 space-y-4">
-                  {day.timeline.map((item, idx) => {
-                    const itemComments = getCommentsForItem(day.day, idx);
-                    const isCommentTarget = commentTarget?.day === day.day && commentTarget?.index === idx;
-                    
-                    return (
-                      <div
-                        key={idx}
-                        className={`relative ${
-                          item.highlight
-                            ? "bg-[#ff6b9d]/20 -ml-4 pl-4 py-2 rounded-r-xl border-l-2 border-[#ff6b9d]"
-                            : ""
-                        }`}
-                      >
-                        {item.time && (
-                          <div className="text-xs text-[#4ecdc4] font-bold mb-1">{item.time}</div>
-                        )}
-                        <div className="font-bold">
-                          {item.url ? (
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[#4ecdc4] hover:underline"
-                            >
-                              {item.title} 🔗
-                            </a>
-                          ) : (
-                            item.title
-                          )}
-                          {item.tag && (
-                            <span className="ml-2 text-xs bg-[#ff6b9d] px-2 py-1 rounded">{item.tag}</span>
-                          )}
-                        </div>
-                        <div className="text-sm opacity-70 whitespace-pre-line">{item.desc}</div>
-                        
-                        <div className="flex items-center gap-2 mt-2">
-                          {item.mapUrl && <MapButton url={item.mapUrl} />}
-                          <button
-                            onClick={() => setCommentTarget(isCommentTarget ? null : { day: day.day, index: idx })}
-                            className="inline-flex items-center gap-1 text-xs bg-[#6b89ff]/30 hover:bg-[#6b89ff]/50 text-[#6b89ff] px-2 py-1 rounded-full transition"
-                          >
-                            💬 {itemComments.length > 0 ? itemComments.length : ""}
-                          </button>
-                        </div>
-
-                        {/* コメント表示 */}
-                        {itemComments.length > 0 && (
-                          <div className="mt-2 space-y-2">
-                            {itemComments.map(comment => (
-                              <div key={comment.id} className="bg-white/5 rounded-lg p-2 text-sm">
-                                <div className="flex justify-between items-start">
-                                  <span className="font-bold text-[#6b89ff]">{comment.author}</span>
-                                  <button
-                                    onClick={() => handleDeleteComment(comment.id)}
-                                    className="text-xs opacity-50 hover:opacity-100"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                                <p className="opacity-90">{comment.text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* コメント入力フォーム */}
-                        {isCommentTarget && (
-                          <div className="mt-2 bg-white/5 rounded-lg p-3 space-y-2">
-                            <div className="flex flex-wrap gap-2">
-                              {members.map(member => (
-                                <button
-                                  key={member}
-                                  onClick={() => setNewComment(prev => ({ ...prev, author: member }))}
-                                  className={`px-2 py-1 rounded-full text-xs transition ${
-                                    newComment.author === member
-                                      ? "bg-[#6b89ff] text-white"
-                                      : "bg-white/10 hover:bg-white/20"
-                                  }`}
-                                >
-                                  {member}
-                                </button>
-                              ))}
-                            </div>
-                            <input
-                              type="text"
-                              value={newComment.text}
-                              onChange={(e) => setNewComment(prev => ({ ...prev, text: e.target.value }))}
-                              placeholder="コメントを入力..."
-                              className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#6b89ff]"
-                            />
-                            <div className="flex gap-2">
-                              <button
-                                onClick={handleAddComment}
-                                className="flex-1 py-1 bg-[#6b89ff] text-white rounded-lg text-sm font-bold hover:bg-[#5a78ee] transition"
-                              >
-                                投稿
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setCommentTarget(null);
-                                  setNewComment({ author: "", text: "" });
-                                }}
-                                className="px-3 py-1 bg-white/10 rounded-lg text-sm hover:bg-white/20 transition"
-                              >
-                                閉じる
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Saunas */}
-        {tripData.saunas && (
-          <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
-            <div
-              className="flex justify-between items-center cursor-pointer"
-              onClick={() => toggleSection("saunas")}
-            >
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <span>🧖</span> 定山渓サウナ施設
-              </h2>
-              <span className={`opacity-40 transition-transform ${openSections.includes("saunas") ? "rotate-180" : ""}`}>
-                ▼
-              </span>
-            </div>
-
-            {openSections.includes("saunas") && (
-              <div className="mt-4">
-                <a
-                  href={tripData.saunas.infoUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block bg-[#ff6b9d]/20 text-[#ff6b9d] px-4 py-2 rounded-lg hover:bg-[#ff6b9d]/30 transition mb-4"
-                >
-                  📖 日帰り入浴施設一覧を見る 🔗
-                </a>
-                <div className="mt-4">
-                  <p className="text-sm text-[#4ecdc4] font-bold mb-2">おすすめ施設</p>
-                  <div className="flex flex-wrap gap-2">
-                    {tripData.saunas.recommended.map((name, idx) => (
-                      <span key={idx} className="bg-white/10 px-3 py-1 rounded-full text-sm">{name}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Checklist */}
-        <div className="bg-[#1e1e32]/90 backdrop-blur rounded-2xl p-6 mb-5 border border-white/30">
-          <h2 className="text-xl font-bold flex items-center gap-2 mb-4">
-            <span>📝</span> 決めること
-          </h2>
-
-          <div className="space-y-3">
-            {tripData.checklist.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex items-start gap-3 py-3 border-b border-white/10 last:border-0"
-              >
-                <button
-                  onClick={() => toggleChecklist(idx)}
-                  className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition ${
-                    item.done ? "bg-[#4ecdc4] border-[#4ecdc4] text-[#1a1a2e]" : "border-white/50"
-                  }`}
-                >
-                  {item.done && "✓"}
-                </button>
-                <div>
-                  <div className={item.done ? "line-through opacity-60" : "font-bold"}>{item.text}</div>
-                  <div className={`text-sm ${item.done ? "text-[#4ecdc4]" : "opacity-70"}`}>
-                    {item.done ? `→ ${item.result}` : item.options}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Costs */}
+        {/* 9. 💰 Costs */}
         {tripData.costs && (
           <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
             <div
