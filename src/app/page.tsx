@@ -49,6 +49,20 @@ type Saunas = {
   recommended: string[];
 };
 
+type Expense = {
+  id: string;
+  paidBy: string;
+  description: string;
+  amount: number;
+  splitAmong: string[];
+  date: string;
+};
+
+type ExpenseSplitter = {
+  members: string[];
+  expenses: Expense[];
+};
+
 type TripData = {
   title: string;
   dates: string;
@@ -99,6 +113,7 @@ type TripData = {
     options?: string;
   }[];
   costs?: Costs;
+  expenseSplitter?: ExpenseSplitter;
   updatedAt: string;
 };
 
@@ -162,6 +177,67 @@ function WeatherCard({ forecast, showSnowboard = false }: { forecast: DailyForec
   );
 }
 
+// 精算結果を計算する関数
+function calculateSettlements(members: string[], expenses: Expense[]): { from: string; to: string; amount: number }[] {
+  // 各メンバーの収支を計算
+  const balances: Record<string, number> = {};
+  members.forEach(m => balances[m] = 0);
+
+  expenses.forEach(expense => {
+    const splitCount = expense.splitAmong.length;
+    const perPerson = expense.amount / splitCount;
+    
+    // 支払った人はプラス
+    balances[expense.paidBy] += expense.amount;
+    
+    // 割り勘対象者はマイナス
+    expense.splitAmong.forEach(member => {
+      balances[member] -= perPerson;
+    });
+  });
+
+  // 精算が必要な人を分類
+  const debtors: { name: string; amount: number }[] = [];
+  const creditors: { name: string; amount: number }[] = [];
+
+  Object.entries(balances).forEach(([name, balance]) => {
+    if (balance < -1) { // 1円以下は無視
+      debtors.push({ name, amount: -balance });
+    } else if (balance > 1) {
+      creditors.push({ name, amount: balance });
+    }
+  });
+
+  // 精算リストを作成（シンプルな方法）
+  const settlements: { from: string; to: string; amount: number }[] = [];
+  
+  debtors.sort((a, b) => b.amount - a.amount);
+  creditors.sort((a, b) => b.amount - a.amount);
+
+  let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const debtor = debtors[i];
+    const creditor = creditors[j];
+    const amount = Math.min(debtor.amount, creditor.amount);
+
+    if (amount > 1) {
+      settlements.push({
+        from: debtor.name,
+        to: creditor.name,
+        amount: Math.round(amount),
+      });
+    }
+
+    debtor.amount -= amount;
+    creditor.amount -= amount;
+
+    if (debtor.amount < 1) i++;
+    if (creditor.amount < 1) j++;
+  }
+
+  return settlements;
+}
+
 export default function Home() {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -174,6 +250,15 @@ export default function Home() {
   const [weatherData, setWeatherData] = useState<Record<string, DailyForecast[]>>({});
   const [weatherLoading, setWeatherLoading] = useState(true);
 
+  // 割り勘計算機のstate
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [newExpense, setNewExpense] = useState({
+    paidBy: "",
+    description: "",
+    amount: "",
+    splitAmong: [] as string[],
+  });
+
   // 旅行日程（2026年1月11日〜13日）
   const tripDates = {
     day1: "2026-01-11",
@@ -181,6 +266,9 @@ export default function Home() {
     day3: "2026-01-13",
   };
 
+  // デフォルトメンバー
+  const defaultMembers = ["和也", "こばお", "かいと", "さやか", "もえぎちゃん"];
+  
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, "trips", "hokkaido-2026"),
@@ -206,7 +294,6 @@ export default function Home() {
       try {
         const results: Record<string, DailyForecast[]> = {};
         
-        // 各地点の天気を取得
         for (const [key, loc] of Object.entries(locations)) {
           results[key] = await fetchWeatherForecast(loc.lat, loc.lon, loc.name);
         }
@@ -274,18 +361,80 @@ export default function Home() {
     return `¥${amount}`;
   };
 
+  // 割り勘関連の関数
+  const getMembers = () => {
+    return tripData?.expenseSplitter?.members || defaultMembers;
+  };
+
+  const getExpenses = () => {
+    return tripData?.expenseSplitter?.expenses || [];
+  };
+
+  const handleAddExpense = async () => {
+    if (!tripData || !newExpense.paidBy || !newExpense.description || !newExpense.amount) {
+      alert("すべての項目を入力してください");
+      return;
+    }
+
+    const expense: Expense = {
+      id: Date.now().toString(),
+      paidBy: newExpense.paidBy,
+      description: newExpense.description,
+      amount: parseInt(newExpense.amount),
+      splitAmong: newExpense.splitAmong.length > 0 ? newExpense.splitAmong : getMembers(),
+      date: new Date().toISOString(),
+    };
+
+    const currentExpenses = getExpenses();
+    const updatedExpenseSplitter = {
+      members: getMembers(),
+      expenses: [...currentExpenses, expense],
+    };
+
+    await updateDoc(doc(db, "trips", "hokkaido-2026"), {
+      expenseSplitter: updatedExpenseSplitter,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setNewExpense({ paidBy: "", description: "", amount: "", splitAmong: [] });
+    setShowExpenseForm(false);
+  };
+
+  const handleDeleteExpense = async (expenseId: string) => {
+    if (!tripData) return;
+    
+    const currentExpenses = getExpenses();
+    const updatedExpenses = currentExpenses.filter(e => e.id !== expenseId);
+    
+    await updateDoc(doc(db, "trips", "hokkaido-2026"), {
+      expenseSplitter: {
+        members: getMembers(),
+        expenses: updatedExpenses,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  const toggleSplitMember = (member: string) => {
+    setNewExpense(prev => ({
+      ...prev,
+      splitAmong: prev.splitAmong.includes(member)
+        ? prev.splitAmong.filter(m => m !== member)
+        : [...prev.splitAmong, member],
+    }));
+  };
+
   // 各日の天気を取得するヘルパー関数
   const getWeatherForDay = (dayNum: number): { forecast: DailyForecast | null; location: string } => {
     const dateKey = dayNum === 1 ? tripDates.day1 : dayNum === 2 ? tripDates.day2 : tripDates.day3;
     
-    // 日によって表示する地点を変える
     let locationKey = "sapporo";
     if (dayNum === 1) {
-      locationKey = "jozankei"; // 1日目は定山渓メイン
+      locationKey = "jozankei";
     } else if (dayNum === 2) {
-      locationKey = "rusutsu"; // 2日目はルスツ
+      locationKey = "rusutsu";
     } else {
-      locationKey = "sapporo"; // 3日目は札幌
+      locationKey = "sapporo";
     }
     
     const forecasts = weatherData[locationKey] || [];
@@ -317,6 +466,11 @@ export default function Home() {
       </div>
     );
   }
+
+  const members = getMembers();
+  const expenses = getExpenses();
+  const settlements = calculateSettlements(members, expenses);
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460] text-white">
@@ -383,7 +537,6 @@ export default function Home() {
                 </div>
               ) : (
                 <>
-                  {/* Day 1 */}
                   <div>
                     <div className="text-sm text-[#4ecdc4] font-bold mb-2">
                       1月11日（日）─ 支笏湖・定山渓
@@ -391,7 +544,6 @@ export default function Home() {
                     <WeatherCard forecast={getWeatherForDay(1).forecast} />
                   </div>
                   
-                  {/* Day 2 - スノボの日 */}
                   <div>
                     <div className="text-sm text-[#ff6b9d] font-bold mb-2">
                       1月12日（月）─ ルスツリゾート 🏂
@@ -399,7 +551,6 @@ export default function Home() {
                     <WeatherCard forecast={getWeatherForDay(2).forecast} showSnowboard={true} />
                   </div>
                   
-                  {/* Day 3 */}
                   <div>
                     <div className="text-sm text-[#4ecdc4] font-bold mb-2">
                       1月13日（火）─ 札幌・新千歳
@@ -411,6 +562,195 @@ export default function Home() {
                     ※ Open-Meteo APIより取得（7日間予報）
                   </p>
                 </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Expense Splitter */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("expenses")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>💸</span> 割り勘計算
+            </h2>
+            <span
+              className={`opacity-40 transition-transform ${
+                openSections.includes("expenses") ? "rotate-180" : ""
+              }`}
+            >
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("expenses") && (
+            <div className="mt-4 space-y-4">
+              {/* 支払い追加ボタン */}
+              {!showExpenseForm ? (
+                <button
+                  onClick={() => setShowExpenseForm(true)}
+                  className="w-full py-3 bg-[#4ecdc4]/20 text-[#4ecdc4] rounded-xl font-bold hover:bg-[#4ecdc4]/30 transition"
+                >
+                  ＋ 支払いを追加
+                </button>
+              ) : (
+                /* 支払い入力フォーム */
+                <div className="bg-white/5 rounded-xl p-4 space-y-4">
+                  <div>
+                    <label className="text-sm opacity-70 block mb-1">誰が払った？</label>
+                    <div className="flex flex-wrap gap-2">
+                      {members.map(member => (
+                        <button
+                          key={member}
+                          onClick={() => setNewExpense(prev => ({ ...prev, paidBy: member }))}
+                          className={`px-3 py-1 rounded-full text-sm transition ${
+                            newExpense.paidBy === member
+                              ? "bg-[#4ecdc4] text-[#1a1a2e]"
+                              : "bg-white/10 hover:bg-white/20"
+                          }`}
+                        >
+                          {member}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm opacity-70 block mb-1">何に使った？</label>
+                    <input
+                      type="text"
+                      value={newExpense.description}
+                      onChange={(e) => setNewExpense(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="例：夕食代、タクシー代"
+                      className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-[#4ecdc4]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm opacity-70 block mb-1">いくら？</label>
+                    <input
+                      type="number"
+                      value={newExpense.amount}
+                      onChange={(e) => setNewExpense(prev => ({ ...prev, amount: e.target.value }))}
+                      placeholder="金額を入力"
+                      className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-[#4ecdc4]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm opacity-70 block mb-1">
+                      誰で割る？（選択しないと全員）
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {members.map(member => (
+                        <button
+                          key={member}
+                          onClick={() => toggleSplitMember(member)}
+                          className={`px-3 py-1 rounded-full text-sm transition ${
+                            newExpense.splitAmong.includes(member)
+                              ? "bg-[#ff6b9d] text-white"
+                              : "bg-white/10 hover:bg-white/20"
+                          }`}
+                        >
+                          {member}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddExpense}
+                      className="flex-1 py-2 bg-[#4ecdc4] text-[#1a1a2e] rounded-lg font-bold hover:bg-[#3dbdb5] transition"
+                    >
+                      追加
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExpenseForm(false);
+                        setNewExpense({ paidBy: "", description: "", amount: "", splitAmong: [] });
+                      }}
+                      className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 支払い履歴 */}
+              {expenses.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm text-[#4ecdc4] font-bold">支払い履歴</h3>
+                  {expenses.map(expense => (
+                    <div
+                      key={expense.id}
+                      className="bg-white/5 rounded-lg p-3 flex items-center justify-between"
+                    >
+                      <div>
+                        <div className="font-bold">{expense.description}</div>
+                        <div className="text-sm opacity-70">
+                          {expense.paidBy} が支払い → {expense.splitAmong.length}人で割り勘
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="font-bold text-[#4ecdc4]">
+                            ¥{expense.amount.toLocaleString()}
+                          </div>
+                          <div className="text-xs opacity-50">
+                            (¥{Math.round(expense.amount / expense.splitAmong.length).toLocaleString()}/人)
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteExpense(expense.id)}
+                          className="text-[#ff6b9d] hover:bg-[#ff6b9d]/20 p-1 rounded"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* 合計 */}
+                  <div className="bg-[#4ecdc4]/20 rounded-xl p-4 mt-4">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">支払い合計</span>
+                      <span className="text-xl font-bold text-[#4ecdc4]">
+                        ¥{totalExpenses.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 精算結果 */}
+              {settlements.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm text-[#ff6b9d] font-bold">💰 精算</h3>
+                  <div className="bg-[#ff6b9d]/20 rounded-xl p-4 space-y-2">
+                    {settlements.map((s, idx) => (
+                      <div key={idx} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold">{s.from}</span>
+                          <span className="text-[#ff6b9d]">→</span>
+                          <span className="font-bold">{s.to}</span>
+                        </div>
+                        <span className="font-bold text-[#ff6b9d]">
+                          ¥{s.amount.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {expenses.length === 0 && (
+                <p className="text-center text-sm opacity-50 py-4">
+                  まだ支払い記録がありません
+                </p>
               )}
             </div>
           )}
@@ -436,7 +776,6 @@ export default function Home() {
 
           {openSections.includes("flight") && (
             <div className="mt-4 space-y-4">
-              {/* Outbound */}
               <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
                 <div className="text-sm text-[#4ecdc4] mb-2">
                   往路 ─ {tripData.flight.outbound.date}
@@ -472,7 +811,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Inbound */}
               <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
                 <div className="text-sm text-[#4ecdc4] mb-2">
                   復路 ─ {tripData.flight.inbound.date}
@@ -594,7 +932,6 @@ export default function Home() {
                     )}
                   </p>
                 </div>
-                {/* 天気アイコンをDAYカードに表示 */}
                 {!weatherLoading && getWeatherForDay(day.day).forecast && (
                   <div className="text-2xl">
                     {getWeatherForDay(day.day).forecast?.weatherIcon}
@@ -768,7 +1105,6 @@ export default function Home() {
 
             {openSections.includes("costs") && (
               <div className="mt-4 space-y-6">
-                {/* Shared Costs */}
                 <div>
                   <h3 className="text-sm text-[#4ecdc4] font-bold mb-3">
                     🚗 みんなで割り勘
@@ -814,7 +1150,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Individual Costs */}
                 <div>
                   <h3 className="text-sm text-[#ff6b9d] font-bold mb-3">
                     🎿 個人で払うもの
@@ -851,7 +1186,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Note */}
                 <p className="text-xs text-center opacity-50">
                   {tripData.costs.note}
                 </p>
