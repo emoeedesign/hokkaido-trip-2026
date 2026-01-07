@@ -63,6 +63,15 @@ type ExpenseSplitter = {
   expenses: Expense[];
 };
 
+type Comment = {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: string;
+  targetDay: number;
+  targetIndex: number;
+};
+
 type TripData = {
   title: string;
   dates: string;
@@ -114,6 +123,8 @@ type TripData = {
   }[];
   costs?: Costs;
   expenseSplitter?: ExpenseSplitter;
+  comments?: Comment[];
+  spotifyPlaylist?: string;
   updatedAt: string;
 };
 
@@ -179,36 +190,29 @@ function WeatherCard({ forecast, showSnowboard = false }: { forecast: DailyForec
 
 // 精算結果を計算する関数
 function calculateSettlements(members: string[], expenses: Expense[]): { from: string; to: string; amount: number }[] {
-  // 各メンバーの収支を計算
   const balances: Record<string, number> = {};
   members.forEach(m => balances[m] = 0);
 
   expenses.forEach(expense => {
     const splitCount = expense.splitAmong.length;
     const perPerson = expense.amount / splitCount;
-    
-    // 支払った人はプラス
     balances[expense.paidBy] += expense.amount;
-    
-    // 割り勘対象者はマイナス
     expense.splitAmong.forEach(member => {
       balances[member] -= perPerson;
     });
   });
 
-  // 精算が必要な人を分類
   const debtors: { name: string; amount: number }[] = [];
   const creditors: { name: string; amount: number }[] = [];
 
   Object.entries(balances).forEach(([name, balance]) => {
-    if (balance < -1) { // 1円以下は無視
+    if (balance < -1) {
       debtors.push({ name, amount: -balance });
     } else if (balance > 1) {
       creditors.push({ name, amount: balance });
     }
   });
 
-  // 精算リストを作成（シンプルな方法）
   const settlements: { from: string; to: string; amount: number }[] = [];
   
   debtors.sort((a, b) => b.amount - a.amount);
@@ -238,6 +242,13 @@ function calculateSettlements(members: string[], expenses: Expense[]): { from: s
   return settlements;
 }
 
+// SpotifyのURLからIDを抽出
+function extractSpotifyId(url: string): string | null {
+  // https://open.spotify.com/playlist/xxxxx?si=yyyy
+  const match = url.match(/playlist\/([a-zA-Z0-9]+)/);
+  return match ? match[1] : null;
+}
+
 export default function Home() {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,7 +270,15 @@ export default function Home() {
     splitAmong: [] as string[],
   });
 
-  // 旅行日程（2026年1月11日〜13日）
+  // コメント機能のstate
+  const [commentTarget, setCommentTarget] = useState<{ day: number; index: number } | null>(null);
+  const [newComment, setNewComment] = useState({ author: "", text: "" });
+
+  // Spotifyのstate
+  const [showSpotifyForm, setShowSpotifyForm] = useState(false);
+  const [spotifyUrl, setSpotifyUrl] = useState("");
+
+  // 旅行日程
   const tripDates = {
     day1: "2026-01-11",
     day2: "2026-01-12", 
@@ -268,7 +287,7 @@ export default function Home() {
 
   // デフォルトメンバー
   const defaultMembers = ["和也", "こばお", "かいと", "さやか", "もえぎちゃん"];
-  
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, "trips", "hokkaido-2026"),
@@ -424,6 +443,71 @@ export default function Home() {
     }));
   };
 
+  // コメント関連の関数
+  const getComments = () => {
+    return tripData?.comments || [];
+  };
+
+  const getCommentsForItem = (day: number, index: number) => {
+    return getComments().filter(c => c.targetDay === day && c.targetIndex === index);
+  };
+
+  const handleAddComment = async () => {
+    if (!tripData || !commentTarget || !newComment.author || !newComment.text) {
+      alert("名前とコメントを入力してください");
+      return;
+    }
+
+    const comment: Comment = {
+      id: Date.now().toString(),
+      author: newComment.author,
+      text: newComment.text,
+      timestamp: new Date().toISOString(),
+      targetDay: commentTarget.day,
+      targetIndex: commentTarget.index,
+    };
+
+    const currentComments = getComments();
+
+    await updateDoc(doc(db, "trips", "hokkaido-2026"), {
+      comments: [...currentComments, comment],
+      updatedAt: new Date().toISOString(),
+    });
+
+    setNewComment({ author: "", text: "" });
+    setCommentTarget(null);
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!tripData) return;
+    
+    const updatedComments = getComments().filter(c => c.id !== commentId);
+    
+    await updateDoc(doc(db, "trips", "hokkaido-2026"), {
+      comments: updatedComments,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  // Spotify関連の関数
+  const handleSaveSpotify = async () => {
+    if (!tripData || !spotifyUrl) return;
+
+    const playlistId = extractSpotifyId(spotifyUrl);
+    if (!playlistId) {
+      alert("正しいSpotifyプレイリストのURLを入力してください");
+      return;
+    }
+
+    await updateDoc(doc(db, "trips", "hokkaido-2026"), {
+      spotifyPlaylist: playlistId,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setSpotifyUrl("");
+    setShowSpotifyForm(false);
+  };
+
   // 各日の天気を取得するヘルパー関数
   const getWeatherForDay = (dayNum: number): { forecast: DailyForecast | null; location: string } => {
     const dateKey = dayNum === 1 ? tripDates.day1 : dayNum === 2 ? tripDates.day2 : tripDates.day3;
@@ -485,18 +569,8 @@ export default function Home() {
               className="bg-white/10 text-3xl font-bold text-center rounded px-4 py-2"
               autoFocus
             />
-            <button
-              onClick={() => saveEdit("title")}
-              className="text-[#4ecdc4]"
-            >
-              ✓
-            </button>
-            <button
-              onClick={() => setEditingField(null)}
-              className="text-[#ff6b9d]"
-            >
-              ✕
-            </button>
+            <button onClick={() => saveEdit("title")} className="text-[#4ecdc4]">✓</button>
+            <button onClick={() => setEditingField(null)} className="text-[#ff6b9d]">✕</button>
           </div>
         ) : (
           <h1
@@ -511,6 +585,76 @@ export default function Home() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pb-12">
+        {/* Spotify Playlist */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("spotify")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>🎵</span> ドライブプレイリスト
+            </h2>
+            <span className={`opacity-40 transition-transform ${openSections.includes("spotify") ? "rotate-180" : ""}`}>
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("spotify") && (
+            <div className="mt-4">
+              {tripData.spotifyPlaylist ? (
+                <div>
+                  <iframe
+                    src={`https://open.spotify.com/embed/playlist/${tripData.spotifyPlaylist}?utm_source=generator&theme=0`}
+                    width="100%"
+                    height="352"
+                    frameBorder="0"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                    className="rounded-xl"
+                  />
+                  <button
+                    onClick={() => setShowSpotifyForm(true)}
+                    className="mt-3 text-sm text-[#4ecdc4] hover:underline"
+                  >
+                    プレイリストを変更
+                  </button>
+                </div>
+              ) : showSpotifyForm ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={spotifyUrl}
+                    onChange={(e) => setSpotifyUrl(e.target.value)}
+                    placeholder="SpotifyプレイリストのURLを貼り付け"
+                    className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-[#1DB954]"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSaveSpotify}
+                      className="flex-1 py-2 bg-[#1DB954] text-white rounded-lg font-bold hover:bg-[#1ed760] transition"
+                    >
+                      保存
+                    </button>
+                    <button
+                      onClick={() => setShowSpotifyForm(false)}
+                      className="px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowSpotifyForm(true)}
+                  className="w-full py-3 bg-[#1DB954]/20 text-[#1DB954] rounded-xl font-bold hover:bg-[#1DB954]/30 transition"
+                >
+                  🎵 プレイリストを追加
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Weather Forecast */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
           <div
@@ -520,11 +664,7 @@ export default function Home() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <span>🌤️</span> 天気予報
             </h2>
-            <span
-              className={`opacity-40 transition-transform ${
-                openSections.includes("weather") ? "rotate-180" : ""
-              }`}
-            >
+            <span className={`opacity-40 transition-transform ${openSections.includes("weather") ? "rotate-180" : ""}`}>
               ▼
             </span>
           </div>
@@ -532,35 +672,22 @@ export default function Home() {
           {openSections.includes("weather") && (
             <div className="mt-4 space-y-4">
               {weatherLoading ? (
-                <div className="text-center py-8 opacity-50">
-                  天気情報を取得中...
-                </div>
+                <div className="text-center py-8 opacity-50">天気情報を取得中...</div>
               ) : (
                 <>
                   <div>
-                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">
-                      1月11日（日）─ 支笏湖・定山渓
-                    </div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月11日（日）─ 支笏湖・定山渓</div>
                     <WeatherCard forecast={getWeatherForDay(1).forecast} />
                   </div>
-                  
                   <div>
-                    <div className="text-sm text-[#ff6b9d] font-bold mb-2">
-                      1月12日（月）─ ルスツリゾート 🏂
-                    </div>
+                    <div className="text-sm text-[#ff6b9d] font-bold mb-2">1月12日（月）─ ルスツリゾート 🏂</div>
                     <WeatherCard forecast={getWeatherForDay(2).forecast} showSnowboard={true} />
                   </div>
-                  
                   <div>
-                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">
-                      1月13日（火）─ 札幌・新千歳
-                    </div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">1月13日（火）─ 札幌・新千歳</div>
                     <WeatherCard forecast={getWeatherForDay(3).forecast} />
                   </div>
-                  
-                  <p className="text-xs text-center opacity-40 mt-4">
-                    ※ Open-Meteo APIより取得（7日間予報）
-                  </p>
+                  <p className="text-xs text-center opacity-40 mt-4">※ Open-Meteo APIより取得（7日間予報）</p>
                 </>
               )}
             </div>
@@ -576,18 +703,13 @@ export default function Home() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <span>💸</span> 割り勘計算
             </h2>
-            <span
-              className={`opacity-40 transition-transform ${
-                openSections.includes("expenses") ? "rotate-180" : ""
-              }`}
-            >
+            <span className={`opacity-40 transition-transform ${openSections.includes("expenses") ? "rotate-180" : ""}`}>
               ▼
             </span>
           </div>
 
           {openSections.includes("expenses") && (
             <div className="mt-4 space-y-4">
-              {/* 支払い追加ボタン */}
               {!showExpenseForm ? (
                 <button
                   onClick={() => setShowExpenseForm(true)}
@@ -596,7 +718,6 @@ export default function Home() {
                   ＋ 支払いを追加
                 </button>
               ) : (
-                /* 支払い入力フォーム */
                 <div className="bg-white/5 rounded-xl p-4 space-y-4">
                   <div>
                     <label className="text-sm opacity-70 block mb-1">誰が払った？</label>
@@ -606,9 +727,7 @@ export default function Home() {
                           key={member}
                           onClick={() => setNewExpense(prev => ({ ...prev, paidBy: member }))}
                           className={`px-3 py-1 rounded-full text-sm transition ${
-                            newExpense.paidBy === member
-                              ? "bg-[#4ecdc4] text-[#1a1a2e]"
-                              : "bg-white/10 hover:bg-white/20"
+                            newExpense.paidBy === member ? "bg-[#4ecdc4] text-[#1a1a2e]" : "bg-white/10 hover:bg-white/20"
                           }`}
                         >
                           {member}
@@ -616,7 +735,6 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-
                   <div>
                     <label className="text-sm opacity-70 block mb-1">何に使った？</label>
                     <input
@@ -627,7 +745,6 @@ export default function Home() {
                       className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-[#4ecdc4]"
                     />
                   </div>
-
                   <div>
                     <label className="text-sm opacity-70 block mb-1">いくら？</label>
                     <input
@@ -638,20 +755,15 @@ export default function Home() {
                       className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-[#4ecdc4]"
                     />
                   </div>
-
                   <div>
-                    <label className="text-sm opacity-70 block mb-1">
-                      誰で割る？（選択しないと全員）
-                    </label>
+                    <label className="text-sm opacity-70 block mb-1">誰で割る？（選択しないと全員）</label>
                     <div className="flex flex-wrap gap-2">
                       {members.map(member => (
                         <button
                           key={member}
                           onClick={() => toggleSplitMember(member)}
                           className={`px-3 py-1 rounded-full text-sm transition ${
-                            newExpense.splitAmong.includes(member)
-                              ? "bg-[#ff6b9d] text-white"
-                              : "bg-white/10 hover:bg-white/20"
+                            newExpense.splitAmong.includes(member) ? "bg-[#ff6b9d] text-white" : "bg-white/10 hover:bg-white/20"
                           }`}
                         >
                           {member}
@@ -659,7 +771,6 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-
                   <div className="flex gap-2">
                     <button
                       onClick={handleAddExpense}
@@ -680,15 +791,11 @@ export default function Home() {
                 </div>
               )}
 
-              {/* 支払い履歴 */}
               {expenses.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-sm text-[#4ecdc4] font-bold">支払い履歴</h3>
                   {expenses.map(expense => (
-                    <div
-                      key={expense.id}
-                      className="bg-white/5 rounded-lg p-3 flex items-center justify-between"
-                    >
+                    <div key={expense.id} className="bg-white/5 rounded-lg p-3 flex items-center justify-between">
                       <div>
                         <div className="font-bold">{expense.description}</div>
                         <div className="text-sm opacity-70">
@@ -697,9 +804,7 @@ export default function Home() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="font-bold text-[#4ecdc4]">
-                            ¥{expense.amount.toLocaleString()}
-                          </div>
+                          <div className="font-bold text-[#4ecdc4]">¥{expense.amount.toLocaleString()}</div>
                           <div className="text-xs opacity-50">
                             (¥{Math.round(expense.amount / expense.splitAmong.length).toLocaleString()}/人)
                           </div>
@@ -713,20 +818,15 @@ export default function Home() {
                       </div>
                     </div>
                   ))}
-                  
-                  {/* 合計 */}
                   <div className="bg-[#4ecdc4]/20 rounded-xl p-4 mt-4">
                     <div className="flex justify-between items-center">
                       <span className="font-bold">支払い合計</span>
-                      <span className="text-xl font-bold text-[#4ecdc4]">
-                        ¥{totalExpenses.toLocaleString()}
-                      </span>
+                      <span className="text-xl font-bold text-[#4ecdc4]">¥{totalExpenses.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* 精算結果 */}
               {settlements.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="text-sm text-[#ff6b9d] font-bold">💰 精算</h3>
@@ -738,9 +838,7 @@ export default function Home() {
                           <span className="text-[#ff6b9d]">→</span>
                           <span className="font-bold">{s.to}</span>
                         </div>
-                        <span className="font-bold text-[#ff6b9d]">
-                          ¥{s.amount.toLocaleString()}
-                        </span>
+                        <span className="font-bold text-[#ff6b9d]">¥{s.amount.toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
@@ -748,9 +846,7 @@ export default function Home() {
               )}
 
               {expenses.length === 0 && (
-                <p className="text-center text-sm opacity-50 py-4">
-                  まだ支払い記録がありません
-                </p>
+                <p className="text-center text-sm opacity-50 py-4">まだ支払い記録がありません</p>
               )}
             </div>
           )}
@@ -765,11 +861,7 @@ export default function Home() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <span>✈️</span> フライト情報
             </h2>
-            <span
-              className={`opacity-40 transition-transform ${
-                openSections.includes("flight") ? "rotate-180" : ""
-              }`}
-            >
+            <span className={`opacity-40 transition-transform ${openSections.includes("flight") ? "rotate-180" : ""}`}>
               ▼
             </span>
           </div>
@@ -777,72 +869,42 @@ export default function Home() {
           {openSections.includes("flight") && (
             <div className="mt-4 space-y-4">
               <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
-                <div className="text-sm text-[#4ecdc4] mb-2">
-                  往路 ─ {tripData.flight.outbound.date}
-                </div>
+                <div className="text-sm text-[#4ecdc4] mb-2">往路 ─ {tripData.flight.outbound.date}</div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
-                      {tripData.flight.outbound.from.code}
-                    </div>
-                    <div className="text-sm opacity-70">
-                      {tripData.flight.outbound.from.name}
-                    </div>
-                    <div className="text-[#4ecdc4]">
-                      {tripData.flight.outbound.from.time}
-                    </div>
+                    <div className="text-2xl font-bold">{tripData.flight.outbound.from.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.outbound.from.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.from.time}</div>
                   </div>
                   <div className="text-2xl">✈︎→</div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
-                      {tripData.flight.outbound.to.code}
-                    </div>
-                    <div className="text-sm opacity-70">
-                      {tripData.flight.outbound.to.name}
-                    </div>
-                    <div className="text-[#4ecdc4]">
-                      {tripData.flight.outbound.to.time}
-                    </div>
+                    <div className="text-2xl font-bold">{tripData.flight.outbound.to.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.outbound.to.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.outbound.to.time}</div>
                   </div>
                 </div>
                 <div className="text-center text-sm opacity-70 mt-2">
-                  {tripData.flight.outbound.airline} 直行便{" "}
-                  {tripData.flight.outbound.duration}
+                  {tripData.flight.outbound.airline} 直行便 {tripData.flight.outbound.duration}
                 </div>
               </div>
 
               <div className="bg-[#4ecdc4]/20 rounded-xl p-4">
-                <div className="text-sm text-[#4ecdc4] mb-2">
-                  復路 ─ {tripData.flight.inbound.date}
-                </div>
+                <div className="text-sm text-[#4ecdc4] mb-2">復路 ─ {tripData.flight.inbound.date}</div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
-                      {tripData.flight.inbound.from.code}
-                    </div>
-                    <div className="text-sm opacity-70">
-                      {tripData.flight.inbound.from.name}
-                    </div>
-                    <div className="text-[#4ecdc4]">
-                      {tripData.flight.inbound.from.time}
-                    </div>
+                    <div className="text-2xl font-bold">{tripData.flight.inbound.from.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.inbound.from.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.from.time}</div>
                   </div>
                   <div className="text-2xl">✈︎→</div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
-                      {tripData.flight.inbound.to.code}
-                    </div>
-                    <div className="text-sm opacity-70">
-                      {tripData.flight.inbound.to.name}
-                    </div>
-                    <div className="text-[#4ecdc4]">
-                      {tripData.flight.inbound.to.time}
-                    </div>
+                    <div className="text-2xl font-bold">{tripData.flight.inbound.to.code}</div>
+                    <div className="text-sm opacity-70">{tripData.flight.inbound.to.name}</div>
+                    <div className="text-[#4ecdc4]">{tripData.flight.inbound.to.time}</div>
                   </div>
                 </div>
                 <div className="text-center text-sm opacity-70 mt-2">
-                  {tripData.flight.inbound.airline} 直行便{" "}
-                  {tripData.flight.inbound.duration}
+                  {tripData.flight.inbound.airline} 直行便 {tripData.flight.inbound.duration}
                 </div>
               </div>
             </div>
@@ -858,11 +920,7 @@ export default function Home() {
             <h2 className="text-xl font-bold flex items-center gap-2">
               <span>🏠</span> 宿泊先
             </h2>
-            <span
-              className={`opacity-40 transition-transform ${
-                openSections.includes("accommodation") ? "rotate-180" : ""
-              }`}
-            >
+            <span className={`opacity-40 transition-transform ${openSections.includes("accommodation") ? "rotate-180" : ""}`}>
               ▼
             </span>
           </div>
@@ -877,22 +935,12 @@ export default function Home() {
               >
                 {tripData.accommodation.name} 🔗
               </a>
-              <p className="mt-2 text-sm opacity-90">
-                {tripData.accommodation.address}
-              </p>
-              {tripData.accommodation.mapUrl && (
-                <MapButton url={tripData.accommodation.mapUrl} />
-              )}
-              <p className="mt-2 text-sm opacity-70">
-                {tripData.accommodation.details}
-              </p>
+              <p className="mt-2 text-sm opacity-90">{tripData.accommodation.address}</p>
+              {tripData.accommodation.mapUrl && <MapButton url={tripData.accommodation.mapUrl} />}
+              <p className="mt-2 text-sm opacity-70">{tripData.accommodation.details}</p>
+              <p className="text-sm opacity-70">★{tripData.accommodation.rating} ／ {tripData.accommodation.access}</p>
               <p className="text-sm opacity-70">
-                ★{tripData.accommodation.rating} ／{" "}
-                {tripData.accommodation.access}
-              </p>
-              <p className="text-sm opacity-70">
-                チェックイン{tripData.accommodation.checkin} ／ チェックアウト
-                {tripData.accommodation.checkout}
+                チェックイン{tripData.accommodation.checkin} ／ チェックアウト{tripData.accommodation.checkout}
               </p>
             </div>
           )}
@@ -933,60 +981,127 @@ export default function Home() {
                   </p>
                 </div>
                 {!weatherLoading && getWeatherForDay(day.day).forecast && (
-                  <div className="text-2xl">
-                    {getWeatherForDay(day.day).forecast?.weatherIcon}
-                  </div>
+                  <div className="text-2xl">{getWeatherForDay(day.day).forecast?.weatherIcon}</div>
                 )}
-                <span
-                  className={`opacity-40 transition-transform ${
-                    openDays.includes(day.day) ? "rotate-180" : ""
-                  }`}
-                >
+                <span className={`opacity-40 transition-transform ${openDays.includes(day.day) ? "rotate-180" : ""}`}>
                   ▼
                 </span>
               </div>
 
               {openDays.includes(day.day) && (
                 <div className="mt-4 ml-4 border-l-2 border-white/20 pl-4 space-y-4">
-                  {day.timeline.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={`relative ${
-                        item.highlight
-                          ? "bg-[#ff6b9d]/20 -ml-4 pl-4 py-2 rounded-r-xl border-l-2 border-[#ff6b9d]"
-                          : ""
-                      }`}
-                    >
-                      {item.time && (
-                        <div className="text-xs text-[#4ecdc4] font-bold mb-1">
-                          {item.time}
+                  {day.timeline.map((item, idx) => {
+                    const itemComments = getCommentsForItem(day.day, idx);
+                    const isCommentTarget = commentTarget?.day === day.day && commentTarget?.index === idx;
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className={`relative ${
+                          item.highlight
+                            ? "bg-[#ff6b9d]/20 -ml-4 pl-4 py-2 rounded-r-xl border-l-2 border-[#ff6b9d]"
+                            : ""
+                        }`}
+                      >
+                        {item.time && (
+                          <div className="text-xs text-[#4ecdc4] font-bold mb-1">{item.time}</div>
+                        )}
+                        <div className="font-bold">
+                          {item.url ? (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#4ecdc4] hover:underline"
+                            >
+                              {item.title} 🔗
+                            </a>
+                          ) : (
+                            item.title
+                          )}
+                          {item.tag && (
+                            <span className="ml-2 text-xs bg-[#ff6b9d] px-2 py-1 rounded">{item.tag}</span>
+                          )}
                         </div>
-                      )}
-                      <div className="font-bold">
-                        {item.url ? (
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[#4ecdc4] hover:underline"
+                        <div className="text-sm opacity-70 whitespace-pre-line">{item.desc}</div>
+                        
+                        <div className="flex items-center gap-2 mt-2">
+                          {item.mapUrl && <MapButton url={item.mapUrl} />}
+                          <button
+                            onClick={() => setCommentTarget(isCommentTarget ? null : { day: day.day, index: idx })}
+                            className="inline-flex items-center gap-1 text-xs bg-[#6b89ff]/30 hover:bg-[#6b89ff]/50 text-[#6b89ff] px-2 py-1 rounded-full transition"
                           >
-                            {item.title} 🔗
-                          </a>
-                        ) : (
-                          item.title
+                            💬 {itemComments.length > 0 ? itemComments.length : ""}
+                          </button>
+                        </div>
+
+                        {/* コメント表示 */}
+                        {itemComments.length > 0 && (
+                          <div className="mt-2 space-y-2">
+                            {itemComments.map(comment => (
+                              <div key={comment.id} className="bg-white/5 rounded-lg p-2 text-sm">
+                                <div className="flex justify-between items-start">
+                                  <span className="font-bold text-[#6b89ff]">{comment.author}</span>
+                                  <button
+                                    onClick={() => handleDeleteComment(comment.id)}
+                                    className="text-xs opacity-50 hover:opacity-100"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                                <p className="opacity-90">{comment.text}</p>
+                              </div>
+                            ))}
+                          </div>
                         )}
-                        {item.tag && (
-                          <span className="ml-2 text-xs bg-[#ff6b9d] px-2 py-1 rounded">
-                            {item.tag}
-                          </span>
+
+                        {/* コメント入力フォーム */}
+                        {isCommentTarget && (
+                          <div className="mt-2 bg-white/5 rounded-lg p-3 space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              {members.map(member => (
+                                <button
+                                  key={member}
+                                  onClick={() => setNewComment(prev => ({ ...prev, author: member }))}
+                                  className={`px-2 py-1 rounded-full text-xs transition ${
+                                    newComment.author === member
+                                      ? "bg-[#6b89ff] text-white"
+                                      : "bg-white/10 hover:bg-white/20"
+                                  }`}
+                                >
+                                  {member}
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="text"
+                              value={newComment.text}
+                              onChange={(e) => setNewComment(prev => ({ ...prev, text: e.target.value }))}
+                              placeholder="コメントを入力..."
+                              className="w-full bg-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#6b89ff]"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={handleAddComment}
+                                className="flex-1 py-1 bg-[#6b89ff] text-white rounded-lg text-sm font-bold hover:bg-[#5a78ee] transition"
+                              >
+                                投稿
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCommentTarget(null);
+                                  setNewComment({ author: "", text: "" });
+                                }}
+                                className="px-3 py-1 bg-white/10 rounded-lg text-sm hover:bg-white/20 transition"
+                              >
+                                閉じる
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
-                      <div className="text-sm opacity-70 whitespace-pre-line">
-                        {item.desc}
-                      </div>
-                      {item.mapUrl && <MapButton url={item.mapUrl} />}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1003,11 +1118,7 @@ export default function Home() {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <span>🧖</span> 定山渓サウナ施設
               </h2>
-              <span
-                className={`opacity-40 transition-transform ${
-                  openSections.includes("saunas") ? "rotate-180" : ""
-                }`}
-              >
+              <span className={`opacity-40 transition-transform ${openSections.includes("saunas") ? "rotate-180" : ""}`}>
                 ▼
               </span>
             </div>
@@ -1022,17 +1133,11 @@ export default function Home() {
                 >
                   📖 日帰り入浴施設一覧を見る 🔗
                 </a>
-                
                 <div className="mt-4">
                   <p className="text-sm text-[#4ecdc4] font-bold mb-2">おすすめ施設</p>
                   <div className="flex flex-wrap gap-2">
                     {tripData.saunas.recommended.map((name, idx) => (
-                      <span
-                        key={idx}
-                        className="bg-white/10 px-3 py-1 rounded-full text-sm"
-                      >
-                        {name}
-                      </span>
+                      <span key={idx} className="bg-white/10 px-3 py-1 rounded-full text-sm">{name}</span>
                     ))}
                   </div>
                 </div>
@@ -1056,26 +1161,14 @@ export default function Home() {
                 <button
                   onClick={() => toggleChecklist(idx)}
                   className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition ${
-                    item.done
-                      ? "bg-[#4ecdc4] border-[#4ecdc4] text-[#1a1a2e]"
-                      : "border-white/50"
+                    item.done ? "bg-[#4ecdc4] border-[#4ecdc4] text-[#1a1a2e]" : "border-white/50"
                   }`}
                 >
                   {item.done && "✓"}
                 </button>
                 <div>
-                  <div
-                    className={
-                      item.done ? "line-through opacity-60" : "font-bold"
-                    }
-                  >
-                    {item.text}
-                  </div>
-                  <div
-                    className={`text-sm ${
-                      item.done ? "text-[#4ecdc4]" : "opacity-70"
-                    }`}
-                  >
+                  <div className={item.done ? "line-through opacity-60" : "font-bold"}>{item.text}</div>
+                  <div className={`text-sm ${item.done ? "text-[#4ecdc4]" : "opacity-70"}`}>
                     {item.done ? `→ ${item.result}` : item.options}
                   </div>
                 </div>
@@ -1094,11 +1187,7 @@ export default function Home() {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <span>💰</span> 費用
               </h2>
-              <span
-                className={`opacity-40 transition-transform ${
-                  openSections.includes("costs") ? "rotate-180" : ""
-                }`}
-              >
+              <span className={`opacity-40 transition-transform ${openSections.includes("costs") ? "rotate-180" : ""}`}>
                 ▼
               </span>
             </div>
@@ -1106,26 +1195,15 @@ export default function Home() {
             {openSections.includes("costs") && (
               <div className="mt-4 space-y-6">
                 <div>
-                  <h3 className="text-sm text-[#4ecdc4] font-bold mb-3">
-                    🚗 みんなで割り勘
-                  </h3>
+                  <h3 className="text-sm text-[#4ecdc4] font-bold mb-3">🚗 みんなで割り勘</h3>
                   <div className="space-y-2">
                     {tripData.costs.shared.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between items-center py-2 border-b border-white/10"
-                      >
+                      <div key={idx} className="flex justify-between items-center py-2 border-b border-white/10">
                         <span className="opacity-90">
                           {item.label}
-                          {item.note && (
-                            <span className="text-xs opacity-50 ml-2">
-                              ({item.note})
-                            </span>
-                          )}
+                          {item.note && <span className="text-xs opacity-50 ml-2">({item.note})</span>}
                         </span>
-                        <span className="font-bold">
-                          {formatAmount(item.amount)}
-                        </span>
+                        <span className="font-bold">{formatAmount(item.amount)}</span>
                       </div>
                     ))}
                   </div>
@@ -1133,17 +1211,13 @@ export default function Home() {
                     <div className="flex justify-between items-center">
                       <span className="opacity-70">合計</span>
                       <span className="font-bold">
-                        ¥{tripData.costs.sharedTotal.min.toLocaleString()} 〜 ¥
-                        {tripData.costs.sharedTotal.max.toLocaleString()}
+                        ¥{tripData.costs.sharedTotal.min.toLocaleString()} 〜 ¥{tripData.costs.sharedTotal.max.toLocaleString()}
                       </span>
                     </div>
                     <div className="flex justify-between items-center mt-2 text-lg">
-                      <span className="text-[#4ecdc4]">
-                        {tripData.costs.perPerson.people}人で割ると
-                      </span>
+                      <span className="text-[#4ecdc4]">{tripData.costs.perPerson.people}人で割ると</span>
                       <span className="font-bold text-[#4ecdc4]">
-                        ¥{tripData.costs.perPerson.min.toLocaleString()} 〜 ¥
-                        {tripData.costs.perPerson.max.toLocaleString()}
+                        ¥{tripData.costs.perPerson.min.toLocaleString()} 〜 ¥{tripData.costs.perPerson.max.toLocaleString()}
                         <span className="text-sm opacity-70">/人</span>
                       </span>
                     </div>
@@ -1151,19 +1225,12 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <h3 className="text-sm text-[#ff6b9d] font-bold mb-3">
-                    🎿 個人で払うもの
-                  </h3>
+                  <h3 className="text-sm text-[#ff6b9d] font-bold mb-3">🎿 個人で払うもの</h3>
                   <div className="space-y-2">
                     {tripData.costs.individual.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between items-center py-2 border-b border-white/10"
-                      >
+                      <div key={idx} className="flex justify-between items-center py-2 border-b border-white/10">
                         <span className="opacity-90">{item.label}</span>
-                        <span className="font-bold">
-                          {formatAmount(item.amount)}
-                        </span>
+                        <span className="font-bold">{formatAmount(item.amount)}</span>
                       </div>
                     ))}
                   </div>
@@ -1171,24 +1238,17 @@ export default function Home() {
                     <div className="flex justify-between items-center text-lg">
                       <span className="text-[#ff6b9d]">個人負担 合計</span>
                       <span className="font-bold text-[#ff6b9d]">
-                        ¥
-                        {tripData.costs.individual
-                          .reduce((sum, item) => {
-                            if (typeof item.amount === "number") {
-                              return sum + item.amount;
-                            }
-                            return sum;
-                          }, 0)
-                          .toLocaleString()}
+                        ¥{tripData.costs.individual.reduce((sum, item) => {
+                          if (typeof item.amount === "number") return sum + item.amount;
+                          return sum;
+                        }, 0).toLocaleString()}
                         <span className="text-sm opacity-70">/人</span>
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <p className="text-xs text-center opacity-50">
-                  {tripData.costs.note}
-                </p>
+                <p className="text-xs text-center opacity-50">{tripData.costs.note}</p>
               </div>
             )}
           </div>
