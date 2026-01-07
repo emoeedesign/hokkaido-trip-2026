@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { seedDatabase } from "@/lib/seedData";
+import { 
+  fetchWeatherForecast, 
+  locations, 
+  type DailyForecast,
+  getForecastForDate 
+} from "@/lib/weather";
 
 type TimelineItem = {
   time: string;
@@ -111,6 +117,51 @@ function MapButton({ url }: { url: string }) {
   );
 }
 
+// 天気カードコンポーネント
+function WeatherCard({ forecast, showSnowboard = false }: { forecast: DailyForecast | null; showSnowboard?: boolean }) {
+  if (!forecast) {
+    return (
+      <div className="bg-white/5 rounded-lg p-3 text-center text-sm opacity-50">
+        天気情報を取得中...
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/10 rounded-xl p-4 border border-white/10">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-4xl">{forecast.weatherIcon}</span>
+          <div>
+            <div className="font-bold">{forecast.weatherLabel}</div>
+            <div className="text-sm opacity-70">{forecast.location}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-lg font-bold">
+            <span className="text-[#ff6b9d]">{forecast.tempMax}°</span>
+            <span className="opacity-50 mx-1">/</span>
+            <span className="text-[#4ecdc4]">{forecast.tempMin}°</span>
+          </div>
+          {forecast.snowfall > 0 && (
+            <div className="text-sm text-[#4ecdc4]">
+              ❄️ 積雪 {forecast.snowfall}cm
+            </div>
+          )}
+        </div>
+      </div>
+      {showSnowboard && (
+        <div 
+          className="mt-3 text-center py-2 rounded-lg font-bold"
+          style={{ backgroundColor: `${forecast.snowboardCondition.color}30`, color: forecast.snowboardCondition.color }}
+        >
+          {forecast.snowboardCondition.label}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,6 +169,17 @@ export default function Home() {
   const [openSections, setOpenSections] = useState<string[]>([]);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  
+  // 天気予報のstate
+  const [weatherData, setWeatherData] = useState<Record<string, DailyForecast[]>>({});
+  const [weatherLoading, setWeatherLoading] = useState(true);
+
+  // 旅行日程（2026年1月11日〜13日）
+  const tripDates = {
+    day1: "2026-01-11",
+    day2: "2026-01-12", 
+    day3: "2026-01-13",
+  };
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -135,6 +197,28 @@ export default function Home() {
     );
 
     return () => unsubscribe();
+  }, []);
+
+  // 天気予報を取得
+  useEffect(() => {
+    async function loadWeather() {
+      setWeatherLoading(true);
+      try {
+        const results: Record<string, DailyForecast[]> = {};
+        
+        // 各地点の天気を取得
+        for (const [key, loc] of Object.entries(locations)) {
+          results[key] = await fetchWeatherForecast(loc.lat, loc.lon, loc.name);
+        }
+        
+        setWeatherData(results);
+      } catch (error) {
+        console.error("天気予報の取得に失敗:", error);
+      }
+      setWeatherLoading(false);
+    }
+    
+    loadWeather();
   }, []);
 
   const handleSeed = async () => {
@@ -188,6 +272,26 @@ export default function Home() {
       return `¥${amount.toLocaleString()}`;
     }
     return `¥${amount}`;
+  };
+
+  // 各日の天気を取得するヘルパー関数
+  const getWeatherForDay = (dayNum: number): { forecast: DailyForecast | null; location: string } => {
+    const dateKey = dayNum === 1 ? tripDates.day1 : dayNum === 2 ? tripDates.day2 : tripDates.day3;
+    
+    // 日によって表示する地点を変える
+    let locationKey = "sapporo";
+    if (dayNum === 1) {
+      locationKey = "jozankei"; // 1日目は定山渓メイン
+    } else if (dayNum === 2) {
+      locationKey = "rusutsu"; // 2日目はルスツ
+    } else {
+      locationKey = "sapporo"; // 3日目は札幌
+    }
+    
+    const forecasts = weatherData[locationKey] || [];
+    const forecast = getForecastForDate(forecasts, dateKey);
+    
+    return { forecast, location: locationKey };
   };
 
   if (loading) {
@@ -253,6 +357,65 @@ export default function Home() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pb-12">
+        {/* Weather Forecast */}
+        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
+          <div
+            className="flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection("weather")}
+          >
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>🌤️</span> 天気予報
+            </h2>
+            <span
+              className={`opacity-40 transition-transform ${
+                openSections.includes("weather") ? "rotate-180" : ""
+              }`}
+            >
+              ▼
+            </span>
+          </div>
+
+          {openSections.includes("weather") && (
+            <div className="mt-4 space-y-4">
+              {weatherLoading ? (
+                <div className="text-center py-8 opacity-50">
+                  天気情報を取得中...
+                </div>
+              ) : (
+                <>
+                  {/* Day 1 */}
+                  <div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">
+                      1月11日（日）─ 支笏湖・定山渓
+                    </div>
+                    <WeatherCard forecast={getWeatherForDay(1).forecast} />
+                  </div>
+                  
+                  {/* Day 2 - スノボの日 */}
+                  <div>
+                    <div className="text-sm text-[#ff6b9d] font-bold mb-2">
+                      1月12日（月）─ ルスツリゾート 🏂
+                    </div>
+                    <WeatherCard forecast={getWeatherForDay(2).forecast} showSnowboard={true} />
+                  </div>
+                  
+                  {/* Day 3 */}
+                  <div>
+                    <div className="text-sm text-[#4ecdc4] font-bold mb-2">
+                      1月13日（火）─ 札幌・新千歳
+                    </div>
+                    <WeatherCard forecast={getWeatherForDay(3).forecast} />
+                  </div>
+                  
+                  <p className="text-xs text-center opacity-40 mt-4">
+                    ※ Open-Meteo APIより取得（7日間予報）
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Flight Info */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 mb-5 border border-white/20">
           <div
@@ -431,6 +594,12 @@ export default function Home() {
                     )}
                   </p>
                 </div>
+                {/* 天気アイコンをDAYカードに表示 */}
+                {!weatherLoading && getWeatherForDay(day.day).forecast && (
+                  <div className="text-2xl">
+                    {getWeatherForDay(day.day).forecast?.weatherIcon}
+                  </div>
+                )}
                 <span
                   className={`opacity-40 transition-transform ${
                     openDays.includes(day.day) ? "rotate-180" : ""
@@ -695,9 +864,6 @@ export default function Home() {
         <div className="text-center text-sm opacity-50">
           最終更新: {new Date(tripData.updatedAt).toLocaleString("ja-JP")}
         </div>
-
-
-      
       </main>
     </div>
   );
